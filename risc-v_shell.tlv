@@ -56,6 +56,8 @@
    $pc[31:0] = >>1$next_pc;
    $next_pc[31:0] = $reset ? 32'b0 : 
                     $taken_br ? $br_tgt_pc :
+                    $is_jal ? $br_tgt_pc :
+                    $is_jalr ? $jalr_tgt_pc :
                     ($pc[31:0] + 32'd4);
 
    //reads instruction at address PC, stores in instr
@@ -102,7 +104,6 @@
                 $is_u_instr ? {$instr[31:12], 12'b0}:
                 $is_j_instr ? {{12{$instr[31]}}, $instr[19:12], $instr[20], $instr[30:21], 1'b0}:
                 32'h0;
-                
    //instruction             
    $dec_bits[10:0] = {$instr[30],$funct3,$opcode};
    $is_lui = $dec_bits ==? 11'bx_xxx_0110111;
@@ -139,9 +140,6 @@
    $slti_result[31:0] = {31'b0, $src1_value < $imm};
    
    
-  
-  
-
    
    //alu
    $result[31:0] = 
@@ -160,22 +158,27 @@
       $is_srl ? $src1_value >> $src2_value[4:0] :
       $is_sltu ? $sltu_rslt :
       $is_sltiu ? $sltu_rslt :
-      $is_lui
-      $is_auipc
-      $is_jal
-      $is_jalr
-      $is_slt
-      $is_slti
-      $is_sra
-      $is_srai
-
-
-     
+      $is_lui ? {$imm[31:12], 12'b0} :
+      $is_auipc ? $pc + $imm :
+      $is_jal ? $pc + 32'd4 :
+      $is_jalr ? $pc + 32'd4 :
+      $is_slt ? (($src1_value[31] == $src2_value[31]) ? $sltu_rslt : {31'b0, $src1_value[31]}) :
+      $is_slti ? (($src1_value[31] == $imm[31]) ? $sltiu_rslt : {31'b0, $src1_value[31]}) :
+      $is_sra ? $sra_rslt[31:0] :
+      $is_srai ? $srai_rslt[31:0] :
+      $is_load ? $src1_value + $imm :
+      $is_s_instr ? $src1_value + $imm :
       32'b0;
-
+   
+   //register file enables and data
    $wr_en = $rd_valid & ($rd != 5'b00000);
    $wr_index[4:0] = $rd[4:0];
-   $wr_data[31:0] = $result[31:0];
+   $wr_data[31:0] = $is_load ? $ld_data :
+                    $result[31:0];
+   
+   //dmem enables
+   $dm_wr_en = $is_s_instr;
+   $dm_rd_en = $is_load;
    
    $taken_br = 
       $is_beq ? ($src1_value == $src2_value) :
@@ -187,12 +190,13 @@
       1'b0;
 
    $br_tgt_pc[31:0] = $pc + $imm;
+   $jalr_tgt_pc[31:0] = $src1_value + $imm;
    // Assert these to end simulation (before Makerchip cycle limit).
    m4+tb()
    *failed = *cyc_cnt > M4_MAX_CYC;
    
    m4+rf(32, 32, $reset, $wr_en, $wr_index[4:0], $wr_data[31:0], $rs1_valid, $rs1[4:0], $src1_value, $rs2_valid, $rs2[4:0], $src2_value)
-   m4+dmem(32, 32, $reset, $addr[4:0], $wr_en, $wr_data[31:0], $rd_en, $rd_data)
+   m4+dmem(32, 32, $reset, $result[6:2], $dm_wr_en, $src2_value, $dm_rd_en, $ld_data)
    m4+cpu_viz()
 \SV
    endmodule
